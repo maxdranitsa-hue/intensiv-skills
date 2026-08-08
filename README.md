@@ -7,7 +7,7 @@
 Открой Claude Code (в VS Code или терминале) и вставь:
 
 ```
-Установи мне все скиллы из репозитория https://github.com/ЮЗЕР/РЕПО
+Установи мне все скиллы из репозитория https://github.com/maxdranitsa-hue/intensiv-skills
 Скачай его и скопируй каждую папку из папки skills/ ко мне в скиллы:
 на Mac — в ~/.claude/skills/, на Windows — в %USERPROFILE%\.claude\skills\
 Потом покажи список, что установилось.
