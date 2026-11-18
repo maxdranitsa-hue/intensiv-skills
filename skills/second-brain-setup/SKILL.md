@@ -12,11 +12,13 @@ argument-hint: "IP сервера, root-пароль, URL приватного �
 $ARGUMENTS
 
 Ожидаешь три вещи (спроси, чего не хватает):
-- **IP сервера** (свежий дроплет DigitalOcean, Ubuntu 22.04)
-- **root-пароль** (из письма DO / из UI при создании)
+- **IP сервера** (свежий VPS, Ubuntu 24.04)
+- **root-пароль** (из письма хостинга или из его личного кабинета)
 - **URL приватного репо участника** (создан на прошлом шаге, вида `git@github.com:USERNAME/second-brain.git` или `https://github.com/USERNAME/second-brain`)
 
-Скилл запускается **на Mac участника**, в папке его локального проекта дня 1 — поэтому у тебя есть доступ к его локальному `.env` и данным. Это важно: `.env` переносим именно отсюда.
+Скилл запускается **на ноутбуке участника** (Mac или Windows), в папке его локального проекта дня 1 — поэтому у тебя есть доступ к его локальному `.env` и данным. Это важно: `.env` переносим именно отсюда.
+
+**Claude или Codex.** Посмотри строку `AGENT=` в локальном `.env`. Если там `AGENT=codex` или ты сам Codex, участник работает через Codex и подписку ChatGPT: на сервер ставим Codex (шаги с пометкой «Codex»). Иначе ставим Claude Code (шаги с пометкой «Claude»). Сервер может быть любым VPS с Ubuntu 24.04 (AdminVPS, 4VPS, DigitalOcean): действуй одинаково.
 
 ---
 
@@ -73,10 +75,18 @@ ssh root@$IP 'bash -s' <<'EOF'
 apt install -y build-essential python3.12 python3.12-venv python3.12-dev
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs
 sudo -iu deploy bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-npm install -g @anthropic-ai/claude-code
 EOF
-ssh root@$IP 'node -v; claude --version; sudo -iu deploy /home/deploy/.local/bin/uv --version'
 ```
+Node нужен боту для задач в Todoist: сервер Todoist запускается через npx.
+
+Агент ставим один, по строке `AGENT` из `.env`:
+```bash
+# Claude
+ssh root@$IP 'npm install -g @anthropic-ai/claude-code && claude --version'
+# Codex
+ssh root@$IP 'npm install -g @openai/codex && codex --version'
+```
+Проверка: `ssh root@$IP 'node -v; sudo -iu deploy /home/deploy/.local/bin/uv --version'`
 
 ---
 
@@ -117,29 +127,58 @@ ssh root@$IP "sudo -iu deploy git clone $REPO_SSH_URL /home/deploy/agent-second-
 
 ---
 
-## Шаг 6. Перенос `.env` с Mac на сервер
+## Шаг 6. Перенос `.env` с ноутбука на сервер
 
 `.env` в git не коммитится (токены) — копируем из локальной папки участника:
 ```bash
 scp ./.env deploy@$IP:/home/deploy/agent-second-brain/.env
 ssh root@$IP 'chown deploy:deploy /home/deploy/agent-second-brain/.env && chmod 600 /home/deploy/agent-second-brain/.env'
 ```
-Если локального `.env` нет (день 1 не заполняли) — собери 4 ключа заново по одному (Telegram Bot Token, Telegram ID, Deepgram, Todoist) и запиши в `.env` на сервере в формате:
+Если локального `.env` нет (день 1 не заполняли) — собери 3 ключа заново по одному (Telegram Bot Token, Telegram ID, Todoist) и запиши в `.env` на сервере в формате:
 ```
 TELEGRAM_BOT_TOKEN=...
-DEEPGRAM_API_KEY=...
 TODOIST_API_KEY=...
 VAULT_PATH=./vault
 ALLOWED_USER_IDS=[...]
+AGENT=claude
 ```
+(`AGENT=codex`, если участник работает в Codex.) Перенёс готовый `.env`: проверь, что в нём есть строка `AGENT=` с тем же значением, что на ноутбуке. Нет строки: допиши.
 
 ---
 
-## Шаг 7. Зависимости + авторизация Claude на сервере
+## Шаг 7. Зависимости + вход агента на сервере
+
+Голосовые бот расшифровывает на сервере моделью GigaAM, ей нужно около 550 МБ памяти. Если на сервере меньше 2 ГБ памяти и нет подкачки (`free -m`), сначала создай файл подкачки на 2 ГБ и закрепи его в `/etc/fstab`. Если модель не скачивается с HuggingFace, допиши в `.env` строку `HF_ENDPOINT=https://hf-mirror.com`.
 
 ```bash
 ssh root@$IP 'sudo -iu deploy bash -c "cd ~/agent-second-brain && ~/.local/bin/uv sync"'
 ```
+
+### Codex: вход в аккаунт ChatGPT по коду
+
+1. Попроси участника в браузере на chatgpt.com: имя слева внизу → **Settings** → **Security** → включить вход по коду устройства для Codex (пункт со словами **device code**). Без этого сервер не войдёт.
+2. Вход храним в файле, на сервере нет связки ключей:
+```bash
+ssh root@$IP 'sudo -iu deploy bash -s' <<'EOF'
+mkdir -p ~/.codex
+grep -q cli_auth_credentials_store ~/.codex/config.toml 2>/dev/null || echo 'cli_auth_credentials_store = "file"' >> ~/.codex/config.toml
+cat ~/.codex/config.toml
+EOF
+```
+3. Запусти вход в фоне и прочитай ссылку и код:
+```bash
+ssh root@$IP 'sudo -iu deploy bash -c "nohup codex login --device-auth > /tmp/codex-login.log 2>&1 &"'
+sleep 8; ssh root@$IP 'cat /tmp/codex-login.log'
+```
+Дай участнику ссылку и код из лога. Он открывает ссылку с включённым VPN, входит тем же аккаунтом ChatGPT, вводит код. Жди его «готово».
+4. Проверка: `ssh root@$IP 'sudo -iu deploy codex login status'` должен показать, что вход выполнен. Пробный запуск:
+```bash
+ssh root@$IP 'sudo -iu deploy bash -c "cd ~/agent-second-brain && codex exec --skip-git-repo-check --ephemeral \"Ответь одним словом: работаю\""'
+```
+Вход обновляется сам, пока бот работает. Файл `~/.codex/auth.json` между ноутбуком и сервером не копируй. Drop-in с токеном Claude для Codex не нужен.
+
+### Claude: долгоживущий токен
+
 Авторизуй Claude CLI под `deploy` (нужно для daily-обработки) — долгоживущим токеном:
 ```bash
 ssh -t root@$IP 'sudo -iu deploy claude setup-token'
@@ -232,7 +271,7 @@ EOF
 launchctl unload ~/Library/LaunchAgents/*second-brain*.plist 2>/dev/null || true
 launchctl unload ~/Library/LaunchAgents/*voicememos*.plist 2>/dev/null || true
 ```
-Если бот дня 1 крутился просто в терминале — попроси участника закрыть то окно (Ctrl+C).
+Если бот дня 1 крутился просто в терминале — попроси участника закрыть то окно (Ctrl+C). На Windows проверь, что не осталось процесса python с d_brain, и останови его.
 
 ---
 
@@ -255,4 +294,6 @@ git pull
 - **`git clone` Permission denied** → deploy-ключ не добавлен в репо или без write access (Шаг 4).
 - **Бот отвечает дважды** → локальный не выключен (Шаг 10).
 - **`second-brain.service` inactive** → `journalctl -u second-brain -n 50`; чаще всего пустой `.env` или не прошёл `uv sync`.
-- **daily-обработка не идёт / 401** → протух токен Claude; повтори Шаг 7 (`claude setup-token`) и обнови drop-in.
+- **daily-обработка не идёт / 401** → Claude: протух токен, повтори Шаг 7 (`claude setup-token`) и обнови drop-in. Codex: повтори вход по коду из Шага 7.
+- **Codex пишет, что вход по коду не включён** → участник не включил вход по коду устройства в Settings → Security на chatgpt.com.
+- **Задачи не появляются в Todoist** → проверь `node -v` на сервере и `TODOIST_API_KEY` в `.env`.
